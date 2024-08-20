@@ -1,6 +1,8 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
-
+import BgImage from "../../public/images/bg1.jpg";
+import BgImage2 from "../../public/images/bg_s.jpg";
+import Image from "next/image";
 type Position = {
   x: number;
   y: number;
@@ -34,12 +36,17 @@ const MTBackground: React.FC = () => {
   }, [position]); // This effect updates whenever the position state changes
 
   return (
-    <section className="w-full h-full bg-blue-900 overflow-hidden absolute">
+    <section className="w-screen h-screen bg-blue-900 overflow-hidden absolute">
+      <Image src={BgImage} width={1920} height={1080} alt="bg image" className="min-w-max h-auto"/>
       <div
         ref={divRef}
-        className="h-full bg-white transition-width duration-1000 ease-out"
-        style={{ width: '50%', minWidth: '40%', maxWidth: '60%' }}
+        className="h-screen bg-white transition-width duration-1000 overflow-hidden ease-out absolute top-0 left-0"
+        style={{ width: "50%", minWidth: "40%", maxWidth: "60%" }}
       >
+        <div className="relative">
+        <Image src={BgImage2} width={1920} height={1080} alt="bg image" className="h-auto min-w-max absolute"/>     
+
+        </div>
       </div>
     </section>
   );

@@ -48,20 +48,47 @@ router.delete("/delete/:id", async (req: Request, res: Response) => {
 });
 
 router.get("/", async (req: Request, res: Response) => {
+  const userId = req.query.userId as string; 
+
   try {
+    // Query to get posts with a "liked" status
     const result = await query(
-      "SELECT user_id, username, display_name, user_profile,verified, post_id, content, created_at, likes_amount, comments_amount FROM users JOIN posts ON users.user_id = posts.author;",
-      []
+      `
+      SELECT
+        users.user_id,
+        users.username,
+        users.display_name,
+        users.user_profile,
+        users.verified,
+        posts.post_id,
+        posts.content,
+        posts.created_at,
+        posts.likes_amount,
+        posts.comments_amount,
+        CASE
+          WHEN likes.user_id IS NOT NULL THEN TRUE
+          ELSE FALSE
+        END AS liked
+      FROM users
+      JOIN posts ON users.user_id = posts.author
+      LEFT JOIN likes ON posts.post_id = likes.post_id AND likes.user_id = $1
+      ORDER BY posts.created_at DESC;
+      `,
+      [userId]
     );
 
-    const postsWithComments = await Promise.all(result.map(async (post: any) => {
+    // Fetch comments for each post
+    const postsWithComments = await Promise.all(
+      result.map(async (post: any) => {
         const comments = await getPostComments(post.post_id);
         return {
           ...post,
-          comments
+          comments,
         };
-      }));
+      })
+    );
 
+    // Respond with the data
     res.status(200).json({ data: postsWithComments });
   } catch (error) {
     console.log(error);
@@ -102,13 +129,15 @@ router.get("/:user_id", async (req: Request, res: Response) => {
       [userIdNumber]
     );
 
-    const postsWithComments = await Promise.all(result.map(async (post: any) => {
+    const postsWithComments = await Promise.all(
+      result.map(async (post: any) => {
         const comments = await getPostComments(post.post_id);
         return {
           ...post,
-          comments
+          comments,
         };
-      }));
+      })
+    );
 
     res.status(200).json({ data: postsWithComments });
   } catch (error) {
@@ -162,13 +191,15 @@ router.get("/friend/:user_id", async (req: Request, res: Response) => {
       [userIdNumber]
     );
 
-    const postsWithComments = await Promise.all(result.map(async (post: any) => {
+    const postsWithComments = await Promise.all(
+      result.map(async (post: any) => {
         const comments = await getPostComments(post.post_id);
         return {
           ...post,
-          comments
+          comments,
         };
-      }));
+      })
+    );
 
     res.status(200).json({ data: postsWithComments });
   } catch (error) {
@@ -177,72 +208,73 @@ router.get("/friend/:user_id", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/like", async (req: Request, res: Response) => {
+  const { post_id } = req.params;
+  const user_id = req.body.user_id;
 
-router.post("/like/:post_id", async (req: Request, res: Response) => {
-    const { post_id } = req.params;
-    const user_id = req.body.user_id;
+  if (!post_id || !user_id) {
+    return res
+      .status(400)
+      .json({ message: "Post ID and user ID are required" });
+  }
 
-    if (!post_id || !user_id) {
-        return res.status(400).json({ message: "Post ID and user ID are required" });
+  try {
+    const existingLike = await query(
+      "SELECT 1 FROM likes WHERE post_id = $1 AND user_id = $2",
+      [post_id, user_id]
+    );
+
+    if (existingLike.length > 0) {
+      // If the like exists, remove it (dislike)
+      await query("DELETE FROM likes WHERE post_id = $1 AND user_id = $2", [
+        post_id,
+        user_id,
+      ]);
+      res.status(200).json({ message: "Like removed successfully" });
+    } else {
+      // If the like does not exist, add it (like)
+      await query("INSERT INTO likes (post_id, user_id) VALUES ($1, $2)", [
+        post_id,
+        user_id,
+      ]);
+      res.status(200).json({ message: "Post liked successfully" });
     }
-
-    try {
-        const existingLike = await query(
-            "SELECT 1 FROM likes WHERE post_id = $1 AND user_id = $2",
-            [post_id, user_id]
-        );
-
-        if (existingLike.length > 0) {
-            // If the like exists, remove it (dislike)
-            await query(
-                "DELETE FROM likes WHERE post_id = $1 AND user_id = $2",
-                [post_id, user_id]
-            );
-            res.status(200).json({ message: "Like removed successfully" });
-        } else {
-            // If the like does not exist, add it (like)
-            await query(
-                "INSERT INTO likes (post_id, user_id) VALUES ($1, $2)",
-                [post_id, user_id]
-            );
-            res.status(200).json({ message: "Post liked successfully" });
-        }
-    } catch (error) {
-        console.error("Error processing like:", error);
-        res.status(500).json({ message: "Internal server error" });
-    }
+  } catch (error) {
+    console.error("Error processing like:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
 });
 
 router.post("/comment", async (req: Request, res: Response) => {
-    const { post_id, user_id, comment } = req.body;
+  const { post_id, user_id, comment } = req.body;
 
-    if (!post_id || !user_id || !comment) {
-        return res.status(400).json({ message: "Post ID, user ID, and comment are required" });
-    }
+  if (!post_id || !user_id || !comment) {
+    return res
+      .status(400)
+      .json({ message: "Post ID, user ID, and comment are required" });
+  }
 
-    const safe_content = ValidateBuffer(comment)
+  const safe_content = ValidateBuffer(comment);
 
-    try {
-        // Insert the new comment into the comments table
-        await query(
-            "INSERT INTO comments (post_id, user_id, comment, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)",
-            [post_id, user_id, safe_content]
-        );
+  try {
+    // Insert the new comment into the comments table
+    await query(
+      "INSERT INTO comments (post_id, user_id, comment, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)",
+      [post_id, user_id, safe_content]
+    );
 
-        // Optionally, increment the comments_amount for the post
-        // This can also be handled by a trigger if desired
-        await query(
-            "UPDATE posts SET comments_amount = comments_amount + 1 WHERE post_id = $1",
-            [post_id]
-        );
+    // Optionally, increment the comments_amount for the post
+    // This can also be handled by a trigger if desired
+    await query(
+      "UPDATE posts SET comments_amount = comments_amount + 1 WHERE post_id = $1",
+      [post_id]
+    );
 
-        res.status(201).json({ message: "Comment added successfully" });
-    } catch (error) {
-        console.error("Error adding comment:", error);
-        res.status(500).json({ message: "Internal server error" });
-    }
+    res.status(201).json({ message: "Comment added successfully" });
+  } catch (error) {
+    console.error("Error adding comment:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
 });
-
-
 
 export default router;
